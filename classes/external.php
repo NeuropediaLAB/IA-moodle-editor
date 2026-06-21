@@ -1,5 +1,5 @@
 <?php
-namespace local_custom_ws;
+namespace local_ia_moodle_editor;
 
 defined('MOODLE_INTERNAL') || die();
 
