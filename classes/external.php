@@ -44,6 +44,7 @@ class external extends external_api {
         require_capability('moodle/course:manageactivities', $context);
 
         require_once($CFG->dirroot . '/course/lib.php');
+        require_once($CFG->dirroot . '/course/modlib.php'); // Required for add_moduleinfo()
         require_once($CFG->dirroot . '/mod/page/lib.php');
 
         $course = $DB->get_record('course', array('id' => $params['courseid']), '*', MUST_EXIST);
