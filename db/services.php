@@ -42,4 +42,12 @@ $functions = array(
         'type'        => 'write',
         'ajax'        => false,
     ),
+    'local_ia_moodle_editor_add_lesson' => array(
+        'classname'   => 'local_ia_moodle_editor\external',
+        'methodname'  => 'add_lesson',
+        'classpath'   => 'local/ia_moodle_editor/classes/external.php',
+        'description' => 'Add a new lesson module instance to a course section.',
+        'type'        => 'write',
+        'ajax'        => false,
+    ),
 );

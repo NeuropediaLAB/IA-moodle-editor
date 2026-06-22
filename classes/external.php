@@ -125,7 +125,7 @@ class external extends external_api {
 
         $course = $DB->get_record('course', array('id' => $params['courseid']), '*', MUST_EXIST);
         course_create_sections_if_missing($course, $params['sectionnum']);
-        $cw = $DB->get_record('course_sections', array('course' => $params['id'] ?? $params['courseid'], 'section' => $params['sectionnum']), '*', MUST_EXIST);
+        $cw = $DB->get_record('course_sections', array('course' => $course->id, 'section' => $params['sectionnum']), '*', MUST_EXIST);
 
         $update = new stdClass();
         $update->id = $cw->id;
@@ -363,6 +363,112 @@ class external extends external_api {
             array(
                 'status' => new external_value(PARAM_BOOL, 'True if successful'),
                 'deletedcount' => new external_value(PARAM_INT, 'Number of pages deleted'),
+            )
+        );
+    }
+
+    public static function add_lesson_parameters() {
+        return new external_function_parameters(
+            array(
+                'courseid'   => new external_value(PARAM_INT, 'ID of the course', VALUE_REQUIRED),
+                'sectionnum' => new external_value(PARAM_INT, 'Section number in the course', VALUE_REQUIRED),
+                'name'       => new external_value(PARAM_TEXT, 'Name of the lesson', VALUE_REQUIRED),
+                'grade'      => new external_value(PARAM_INT, 'Grade for the lesson', VALUE_DEFAULT, 100),
+                'maxanswers' => new external_value(PARAM_INT, 'Maximum number of answers', VALUE_DEFAULT, 5),
+            )
+        );
+    }
+
+    public static function add_lesson($courseid, $sectionnum, $name, $grade, $maxanswers) {
+        global $DB, $CFG;
+
+        $params = self::validate_parameters(self::add_lesson_parameters(), array(
+            'courseid'   => $courseid,
+            'sectionnum' => $sectionnum,
+            'name'       => $name,
+            'grade'      => $grade,
+            'maxanswers' => $maxanswers,
+        ));
+
+        $context = context_course::instance($params['courseid']);
+        self::validate_context($context);
+        require_capability('moodle/course:manageactivities', $context);
+
+        require_once($CFG->dirroot . '/course/lib.php');
+        require_once($CFG->dirroot . '/course/modlib.php');
+
+        $course = $DB->get_record('course', array('id' => $params['courseid']), '*', MUST_EXIST);
+        
+        // Ensure section exists
+        course_create_sections_if_missing($course, $params['sectionnum']);
+        $cw = $DB->get_record('course_sections', array('course' => $course->id, 'section' => $params['sectionnum']), '*', MUST_EXIST);
+
+        $lessonmodule = $DB->get_record('modules', array('name' => 'lesson'), '*', MUST_EXIST);
+
+        // Build module info object
+        $moduleinfo = new stdClass();
+        $moduleinfo->course = $course->id;
+        $moduleinfo->module = $lessonmodule->id;
+        $moduleinfo->modulename = 'lesson';
+        $moduleinfo->section = $cw->section; // Relative section number
+        $moduleinfo->visible = 1;
+        $moduleinfo->visibleoncoursepage = 1;
+        $moduleinfo->cmidnumber = '';
+        $moduleinfo->groupmode = 0;
+        $moduleinfo->groupingid = 0;
+        $moduleinfo->completion = 0;
+
+        $moduleinfo->name = $params['name'];
+        $moduleinfo->intro = '';
+        $moduleinfo->introformat = FORMAT_HTML;
+        $moduleinfo->practice = 0;
+        $moduleinfo->modattempts = 0;
+        $moduleinfo->usepassword = 0;
+        $moduleinfo->password = '';
+        $moduleinfo->dependency = 0;
+        $moduleinfo->conditions = serialize((object)array('timespent' => 0, 'completed' => 0, 'gradebetterthan' => 0));
+        $moduleinfo->grade = $params['grade'];
+        $moduleinfo->custom = 1;
+        $moduleinfo->ongoing = 0;
+        $moduleinfo->usemaxgrade = 0;
+        $moduleinfo->maxanswers = $params['maxanswers'];
+        $moduleinfo->maxattempts = 1;
+        $moduleinfo->review = 0;
+        $moduleinfo->nextpagedefault = 0;
+        $moduleinfo->feedback = 0;
+        $moduleinfo->minquestions = 0;
+        $moduleinfo->maxpages = 1;
+        $moduleinfo->timelimit = 0;
+        $moduleinfo->retake = 0;
+        $moduleinfo->activitylink = 0;
+        $moduleinfo->mediafile = '';
+        $moduleinfo->mediaheight = 480;
+        $moduleinfo->mediawidth = 640;
+        $moduleinfo->mediaclose = 0;
+        $moduleinfo->slideshow = 0;
+        $moduleinfo->width = 640;
+        $moduleinfo->height = 480;
+        $moduleinfo->bgcolor = '#FFFFFF';
+        $moduleinfo->displayleft = 0;
+        $moduleinfo->displayleftif = 0;
+        $moduleinfo->progressbar = 0;
+        $moduleinfo->available = 0;
+        $moduleinfo->deadline = 0;
+        $moduleinfo->allowofflineattempts = 0;
+
+        $moduleinfo = add_moduleinfo($moduleinfo, $course);
+
+        return array(
+            'coursemoduleid' => $moduleinfo->coursemodule,
+            'instanceid'     => $moduleinfo->instance,
+        );
+    }
+
+    public static function add_lesson_returns() {
+        return new external_single_structure(
+            array(
+                'coursemoduleid' => new external_value(PARAM_INT, 'Course module ID'),
+                'instanceid'     => new external_value(PARAM_INT, 'Instance ID (lesson ID)'),
             )
         );
     }
