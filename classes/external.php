@@ -62,7 +62,7 @@ class external extends external_api {
         $moduleinfo->module = $module->id;
         $moduleinfo->modulename = 'page';
         $moduleinfo->instance = 0;
-        $moduleinfo->section = $cw->id;
+        $moduleinfo->section = $cw->section; // Corrected: Use section number instead of db ID
         $moduleinfo->visible = 1;
         $moduleinfo->groupmode = 0;
         $moduleinfo->groupingid = 0;
@@ -125,7 +125,7 @@ class external extends external_api {
 
         $course = $DB->get_record('course', array('id' => $params['courseid']), '*', MUST_EXIST);
         course_create_sections_if_missing($course, $params['sectionnum']);
-        $cw = $DB->get_record('course_sections', array('course' => $params['courseid'], 'section' => $params['sectionnum']), '*', MUST_EXIST);
+        $cw = $DB->get_record('course_sections', array('course' => $params['id'] ?? $params['courseid'], 'section' => $params['sectionnum']), '*', MUST_EXIST);
 
         $update = new stdClass();
         $update->id = $cw->id;
