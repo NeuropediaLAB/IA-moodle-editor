@@ -558,8 +558,11 @@ class external extends external_api {
 
         $moduleinfo->questionsperpage = 1;
         $moduleinfo->shuffleanswers = 1;
-        $moduleinfo->feedbacktext = array('');
-        $moduleinfo->feedbackids = array(0);
+        // Moodle 4.x: feedbacktext must be an array of associative arrays,
+        // NOT an array of plain strings. quiz_add_instance() does $text[$i]['text'].
+        $moduleinfo->feedbacktext          = [['text' => '', 'format' => FORMAT_HTML]];
+        $moduleinfo->feedbackboundarycount = -1;  // -1 = no grade-boundary feedback entries
+        $moduleinfo->feedbackboundaries    = [];
 
         // Add instance
         $moduleinfo = add_moduleinfo($moduleinfo, $course);
