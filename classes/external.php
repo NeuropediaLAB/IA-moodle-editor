@@ -558,6 +558,12 @@ class external extends external_api {
 
         $moduleinfo->questionsperpage = 1;
         $moduleinfo->shuffleanswers = 1;
+
+        // Campos NOT NULL en la tabla quiz — evitan dml_write_exception si no se especifican
+        $moduleinfo->password        = '';   // sin contraseña de acceso
+        $moduleinfo->subnet          = '';   // sin restricción de subred
+        $moduleinfo->browsersecurity = '-';  // sin Safe Exam Browser
+
         // Moodle 4.x: feedbacktext must be an array of associative arrays,
         // NOT an array of plain strings. quiz_add_instance() does $text[$i]['text'].
         $moduleinfo->feedbacktext          = [['text' => '', 'format' => FORMAT_HTML]];
