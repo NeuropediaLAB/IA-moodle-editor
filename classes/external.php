@@ -581,12 +581,14 @@ class external extends external_api {
         }
 
         if ($category) {
-            // --- Paso 4: Añadir preguntas al quiz (compatible Moodle 4.x) ---
-            // Obtener preguntas de la categoría usando la API de question_bank
-            $sql = "SELECT q.id, q.qtype
+            // --- Paso 4: Añadir preguntas al quiz (arquitectura Moodle 4.3) ---
+            // quiz_slots  → solo geometría (slot, page, maxmark). Sin referencia a pregunta.
+            // question_references → une quiz_slots.id con question_bank_entries.id
+
+            $sql = "SELECT q.id AS questionid, qbe.id AS qbankentryid
                       FROM {question} q
-                      JOIN {question_versions} qv ON qv.questionid = q.id
-                      JOIN {question_bank_entries} qbe ON qbe.id = qv.questionbankentryid
+                      JOIN {question_versions} qv  ON qv.questionid         = q.id
+                      JOIN {question_bank_entries} qbe ON qbe.id            = qv.questionbankentryid
                      WHERE qbe.questioncategoryid = ?
                        AND qv.version = (
                            SELECT MAX(v2.version)
@@ -599,12 +601,31 @@ class external extends external_api {
             $questions = $DB->get_records_sql($sql, [$category->id]);
 
             if (!empty($questions)) {
-                // Calcular el slot máximo actual del quiz para no solapar
-                $maxslot = (int)$DB->get_field('quiz_slots', 'MAX(slot)', ['quizid' => $quiz->id]);
+                // Calcular offsets actuales para no solapar slots existentes
+                $maxslot = (int)$DB->get_field_sql(
+                    'SELECT COALESCE(MAX(slot), 0) FROM {quiz_slots} WHERE quizid = ?',
+                    [$quiz->id]
+                );
+                $maxpage = (int)$DB->get_field_sql(
+                    'SELECT COALESCE(MAX(page), 0) FROM {quiz_slots} WHERE quizid = ?',
+                    [$quiz->id]
+                );
                 $currentslot = $maxslot;
-                $currentpage = $maxslot > 0
-                    ? (int)$DB->get_field('quiz_slots', 'MAX(page)', ['quizid' => $quiz->id])
-                    : 0;
+                $currentpage = $maxpage;
+
+                // Contexto del módulo quiz (necesario para question_references)
+                $quizcm = get_coursemodule_from_instance('quiz', $quiz->id, $quiz->course, false, MUST_EXIST);
+                $quizcontext = \context_module::instance($quizcm->id);
+
+                // Asegurar que existe al menos una quiz_section
+                if (!$DB->record_exists('quiz_sections', ['quizid' => $quiz->id])) {
+                    $section = new stdClass();
+                    $section->quizid           = $quiz->id;
+                    $section->firstslot        = 1;
+                    $section->heading          = '';
+                    $section->shufflequestions = 0;
+                    $DB->insert_record('quiz_sections', $section);
+                }
 
                 $count = 0;
                 foreach ($questions as $q) {
@@ -612,35 +633,28 @@ class external extends external_api {
                         break;
                     }
 
-                    // Obtener questionbankentryid de la versión más reciente
-                    $qbankentry = $DB->get_record_sql(
-                        "SELECT qbe.id as qbankentryid, qv.id as versionid
-                           FROM {question_versions} qv
-                           JOIN {question_bank_entries} qbe ON qbe.id = qv.questionbankentryid
-                          WHERE qv.questionid = ?
-                          ORDER BY qv.version DESC
-                          LIMIT 1",
-                        [$q->id]
-                    );
-
-                    if (!$qbankentry) {
-                        continue; // Pregunta sin entrada en el banco, saltar
-                    }
-
                     $currentslot++;
                     $currentpage++;
 
-                    $slot = new stdClass();
-                    $slot->quizid             = $quiz->id;
-                    $slot->slot               = $currentslot;
-                    $slot->page               = $currentpage;
-                    $slot->requireprevious    = 0;
-                    $slot->questioncontextid  = $context->id;
-                    $slot->maxmark            = 1.0000000;
-                    // En Moodle 4.x el slot referencia el question_bank_entry, no el question directamente
-                    $slot->questionbankentryid = $qbankentry->qbankentryid;
+                    // 1) Insertar el slot (solo geometría, sin columnas de pregunta)
+                    $slotrecord = new stdClass();
+                    $slotrecord->quizid          = $quiz->id;
+                    $slotrecord->slot            = $currentslot;
+                    $slotrecord->page            = $currentpage;
+                    $slotrecord->requireprevious = 0;
+                    $slotrecord->maxmark         = 1.0000000;
+                    $slotid = $DB->insert_record('quiz_slots', $slotrecord);
 
-                    $DB->insert_record('quiz_slots', $slot);
+                    // 2) Insertar la referencia a la pregunta en question_references
+                    $ref = new stdClass();
+                    $ref->usingcontextid    = $quizcontext->id;
+                    $ref->component         = 'mod_quiz';
+                    $ref->questionarea      = 'slot';
+                    $ref->itemid            = $slotid;
+                    $ref->questionbankentryid = $q->qbankentryid;
+                    $ref->version           = null; // null = siempre la versión más reciente
+                    $DB->insert_record('question_references', $ref);
+
                     $count++;
                 }
 
