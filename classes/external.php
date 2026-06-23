@@ -578,35 +578,77 @@ class external extends external_api {
         }
 
         if ($category) {
-            // Find questions in category
+            // --- Paso 4: Añadir preguntas al quiz (compatible Moodle 4.x) ---
+            // Obtener preguntas de la categoría usando la API de question_bank
             $sql = "SELECT q.id, q.qtype
                       FROM {question} q
                       JOIN {question_versions} qv ON qv.questionid = q.id
                       JOIN {question_bank_entries} qbe ON qbe.id = qv.questionbankentryid
                      WHERE qbe.questioncategoryid = ?
                        AND qv.version = (
-                           SELECT MAX(version)
-                             FROM {question_versions}
-                            WHERE questionbankentryid = qbe.id
+                           SELECT MAX(v2.version)
+                             FROM {question_versions} v2
+                            WHERE v2.questionbankentryid = qbe.id
                        )
                        AND q.parent = 0
-                       AND q.qtype <> 'random'";
-            $questions = $DB->get_records_sql($sql, array($category->id));
+                       AND q.qtype <> 'random'
+                     ORDER BY q.id ASC";
+            $questions = $DB->get_records_sql($sql, [$category->id]);
 
             if (!empty($questions)) {
-                $page = 1;
+                // Calcular el slot máximo actual del quiz para no solapar
+                $maxslot = (int)$DB->get_field('quiz_slots', 'MAX(slot)', ['quizid' => $quiz->id]);
+                $currentslot = $maxslot;
+                $currentpage = $maxslot > 0
+                    ? (int)$DB->get_field('quiz_slots', 'MAX(page)', ['quizid' => $quiz->id])
+                    : 0;
+
                 $count = 0;
                 foreach ($questions as $q) {
                     if ($count >= $params['numquestions']) {
                         break;
                     }
-                    quiz_add_quiz_question($q->id, $quiz, $page);
-                    $page++;
+
+                    // Obtener questionbankentryid de la versión más reciente
+                    $qbankentry = $DB->get_record_sql(
+                        "SELECT qbe.id as qbankentryid, qv.id as versionid
+                           FROM {question_versions} qv
+                           JOIN {question_bank_entries} qbe ON qbe.id = qv.questionbankentryid
+                          WHERE qv.questionid = ?
+                          ORDER BY qv.version DESC
+                          LIMIT 1",
+                        [$q->id]
+                    );
+
+                    if (!$qbankentry) {
+                        continue; // Pregunta sin entrada en el banco, saltar
+                    }
+
+                    $currentslot++;
+                    $currentpage++;
+
+                    $slot = new stdClass();
+                    $slot->quizid             = $quiz->id;
+                    $slot->slot               = $currentslot;
+                    $slot->page               = $currentpage;
+                    $slot->requireprevious    = 0;
+                    $slot->questioncontextid  = $context->id;
+                    $slot->maxmark            = 1.0000000;
+                    // En Moodle 4.x el slot referencia el question_bank_entry, no el question directamente
+                    $slot->questionbankentryid = $qbankentry->qbankentryid;
+
+                    $DB->insert_record('quiz_slots', $slot);
                     $count++;
                 }
-            } else {
-                // If empty category, add random slots
-                quiz_add_random_questions($quiz, 1, $category->id, $params['numquestions'], true);
+
+                // Actualizar sumgrades del quiz
+                $sumgrades = (float)$DB->get_field_sql(
+                    'SELECT COALESCE(SUM(maxmark), 0) FROM {quiz_slots} WHERE quizid = ?',
+                    [$quiz->id]
+                );
+                $DB->set_field('quiz', 'sumgrades', $sumgrades, ['id' => $quiz->id]);
+                quiz_update_sumgrades($quiz);
+                quiz_delete_previews($quiz);
             }
         }
 
