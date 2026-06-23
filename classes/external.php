@@ -559,10 +559,13 @@ class external extends external_api {
         $moduleinfo->questionsperpage = 1;
         $moduleinfo->shuffleanswers = 1;
 
-        // Campos NOT NULL en la tabla quiz — evitan dml_write_exception si no se especifican
-        $moduleinfo->password        = '';   // sin contraseña de acceso
-        $moduleinfo->subnet          = '';   // sin restricción de subred
-        $moduleinfo->browsersecurity = '-';  // sin Safe Exam Browser
+        // Campos NOT NULL en la tabla quiz — evitan dml_write_exception si no se especifican.
+        // IMPORTANTE: quiz_process_options() hace $quiz->password = $quiz->quizpassword (lib.php:1057).
+        // Si quizpassword no existe, PHP asigna NULL sobreescribiendo cualquier valor previo de password.
+        $moduleinfo->quizpassword    = '';   // nombre real del campo de formulario → mapeado a password
+        $moduleinfo->password        = '';   // fallback explícito por si acaso
+        $moduleinfo->subnet          = '';   // sin restricción de IP/subred
+        $moduleinfo->browsersecurity = '-';  // sin Safe Exam Browser (valor por defecto de Moodle)
 
         // Moodle 4.x: feedbacktext must be an array of associative arrays,
         // NOT an array of plain strings. quiz_add_instance() does $text[$i]['text'].
