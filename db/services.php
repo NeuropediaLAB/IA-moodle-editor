@@ -50,4 +50,29 @@ $functions = array(
         'type'        => 'write',
         'ajax'        => false,
     ),
+    'local_ia_moodle_editor_add_quiz_with_questions' => array(
+        'classname'   => 'local_ia_moodle_editor\external',
+        'methodname'  => 'add_quiz_with_questions',
+        'classpath'   => 'local/ia_moodle_editor/classes/external.php',
+        'description' => 'Create a quiz and add questions to it from a category.',
+        'type'        => 'write',
+        'ajax'        => false,
+    ),
+    'local_ia_moodle_editor_delete_module' => array(
+        'classname'   => 'local_ia_moodle_editor\external',
+        'methodname'  => 'delete_module',
+        'classpath'   => 'local/ia_moodle_editor/classes/external.php',
+        'description' => 'Delete any course module instance safely by course module ID.',
+        'type'        => 'write',
+        'ajax'        => false,
+    ),
+    'local_ia_moodle_editor_update_quiz_settings' => array(
+        'classname'   => 'local_ia_moodle_editor\external',
+        'methodname'  => 'update_quiz_settings',
+        'classpath'   => 'local/ia_moodle_editor/classes/external.php',
+        'description' => 'Update max grade and attempts allowed for a quiz.',
+        'type'        => 'write',
+        'ajax'        => false,
+    ),
 );
+

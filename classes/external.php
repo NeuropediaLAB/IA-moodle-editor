@@ -472,4 +472,251 @@ class external extends external_api {
             )
         );
     }
+
+    public static function add_quiz_with_questions_parameters() {
+        return new external_function_parameters(
+            array(
+                'courseid'     => new external_value(PARAM_INT, 'ID of the course', VALUE_REQUIRED),
+                'sectionnum'   => new external_value(PARAM_INT, 'Section number in the course', VALUE_REQUIRED),
+                'name'         => new external_value(PARAM_TEXT, 'Name of the quiz', VALUE_REQUIRED),
+                'categoryname' => new external_value(PARAM_TEXT, 'Name of the question category', VALUE_REQUIRED),
+                'numquestions' => new external_value(PARAM_INT, 'Number of questions to add', VALUE_REQUIRED),
+            )
+        );
+    }
+
+    public static function add_quiz_with_questions($courseid, $sectionnum, $name, $categoryname, $numquestions) {
+        global $DB, $CFG;
+
+        $params = self::validate_parameters(self::add_quiz_with_questions_parameters(), array(
+            'courseid'     => $courseid,
+            'sectionnum'   => $sectionnum,
+            'name'         => $name,
+            'categoryname' => $categoryname,
+            'numquestions' => $numquestions,
+        ));
+
+        $context = context_course::instance($params['courseid']);
+        self::validate_context($context);
+        require_capability('moodle/course:manageactivities', $context);
+
+        require_once($CFG->dirroot . '/course/lib.php');
+        require_once($CFG->dirroot . '/course/modlib.php');
+        require_once($CFG->dirroot . '/mod/quiz/lib.php');
+        require_once($CFG->dirroot . '/mod/quiz/locallib.php');
+
+        $course = $DB->get_record('course', array('id' => $params['courseid']), '*', MUST_EXIST);
+        
+        // Ensure section exists
+        course_create_sections_if_missing($course, $params['sectionnum']);
+        $cw = $DB->get_record('course_sections', array('course' => $course->id, 'section' => $params['sectionnum']), '*', MUST_EXIST);
+
+        $quizmodule = $DB->get_record('modules', array('name' => 'quiz'), '*', MUST_EXIST);
+
+        // Build module info object
+        $moduleinfo = new stdClass();
+        $moduleinfo->course = $course->id;
+        $moduleinfo->module = $quizmodule->id;
+        $moduleinfo->modulename = 'quiz';
+        $moduleinfo->instance = 0;
+        $moduleinfo->section = $cw->section;
+        $moduleinfo->visible = 1;
+        $moduleinfo->visibleoncoursepage = 1;
+        $moduleinfo->cmidnumber = '';
+        $moduleinfo->groupmode = 0;
+        $moduleinfo->groupingid = 0;
+        $moduleinfo->completion = 0;
+
+        // Quiz specific fields
+        $moduleinfo->name = $params['name'];
+        $moduleinfo->intro = '';
+        $moduleinfo->introformat = FORMAT_HTML;
+        $moduleinfo->timeopen = 0;
+        $moduleinfo->timeclose = 0;
+        $moduleinfo->timelimit = 0;
+        $moduleinfo->overduehandling = 'autosubmit';
+        $moduleinfo->graceperiod = 0;
+        $moduleinfo->preferredbehaviour = 'deferredfeedback';
+        $moduleinfo->canredoquestions = 0;
+        $moduleinfo->attempts = 0;
+        $moduleinfo->grademethod = QUIZ_GRADEHIGHEST;
+        $moduleinfo->decimalpoints = 2;
+        $moduleinfo->questiondecimalpoints = -1;
+        $moduleinfo->attemptonlast = 0;
+        $moduleinfo->gradepass = 0;
+        $moduleinfo->grade = 10.0;
+        $moduleinfo->sumgrades = 0;
+
+        // Default review options
+        $moduleinfo->reviewattempt = 69888;
+        $moduleinfo->reviewcorrectness = 69888;
+        $moduleinfo->reviewmarks = 69888;
+        $moduleinfo->reviewspecificfeedback = 69888;
+        $moduleinfo->reviewgeneralfeedback = 69888;
+        $moduleinfo->reviewrightanswer = 69888;
+        $moduleinfo->reviewoverallfeedback = 69888;
+
+        $moduleinfo->questionsperpage = 1;
+        $moduleinfo->shuffleanswers = 1;
+        $moduleinfo->feedbacktext = array('');
+        $moduleinfo->feedbackids = array(0);
+
+        // Add instance
+        $moduleinfo = add_moduleinfo($moduleinfo, $course);
+
+        // Load quiz record
+        $quiz = $DB->get_record('quiz', array('id' => $moduleinfo->instance), '*', MUST_EXIST);
+
+        // Find question category by name
+        $category = $DB->get_record('question_categories', array('name' => $params['categoryname']));
+        if (!$category) {
+            $category = $DB->get_record('question_categories', array('contextid' => $context->id, 'name' => $params['categoryname']));
+        }
+        if (!$category) {
+            // Find any category with that name
+            $category = $DB->get_record_sql("SELECT * FROM {question_categories} WHERE name = ? ORDER BY id DESC", array($params['categoryname']));
+        }
+
+        if ($category) {
+            // Find questions in category
+            $sql = "SELECT q.id, q.qtype
+                      FROM {question} q
+                      JOIN {question_versions} qv ON qv.questionid = q.id
+                      JOIN {question_bank_entries} qbe ON qbe.id = qv.questionbankentryid
+                     WHERE qbe.questioncategoryid = ?
+                       AND qv.version = (
+                           SELECT MAX(version)
+                             FROM {question_versions}
+                            WHERE questionbankentryid = qbe.id
+                       )
+                       AND q.parent = 0
+                       AND q.qtype <> 'random'";
+            $questions = $DB->get_records_sql($sql, array($category->id));
+
+            if (!empty($questions)) {
+                $page = 1;
+                $count = 0;
+                foreach ($questions as $q) {
+                    if ($count >= $params['numquestions']) {
+                        break;
+                    }
+                    quiz_add_quiz_question($q->id, $quiz, $page);
+                    $page++;
+                    $count++;
+                }
+            } else {
+                // If empty category, add random slots
+                quiz_add_random_questions($quiz, 1, $category->id, $params['numquestions'], true);
+            }
+        }
+
+        return array(
+            'coursemoduleid' => $moduleinfo->coursemodule,
+            'instanceid'     => $moduleinfo->instance,
+        );
+    }
+
+    public static function add_quiz_with_questions_returns() {
+        return new external_single_structure(
+            array(
+                'coursemoduleid' => new external_value(PARAM_INT, 'Course module ID'),
+                'instanceid'     => new external_value(PARAM_INT, 'Instance ID (quiz ID)'),
+            )
+        );
+    }
+
+    public static function delete_module_parameters() {
+        return new external_function_parameters(
+            array(
+                'cmid' => new external_value(PARAM_INT, 'Course module ID', VALUE_REQUIRED),
+            )
+        );
+    }
+
+    public static function delete_module($cmid) {
+        global $DB, $CFG;
+
+        $params = self::validate_parameters(self::delete_module_parameters(), array(
+            'cmid' => $cmid,
+        ));
+
+        $cm = $DB->get_record('course_modules', array('id' => $params['cmid']), '*', MUST_EXIST);
+        $context = context_course::instance($cm->course);
+        self::validate_context($context);
+        require_capability('moodle/course:manageactivities', $context);
+
+        require_once($CFG->dirroot . '/course/lib.php');
+        course_delete_module($cm->id);
+
+        return array(
+            'status' => true,
+        );
+    }
+
+    public static function delete_module_returns() {
+        return new external_single_structure(
+            array(
+                'status' => new external_value(PARAM_BOOL, 'True if successful'),
+            )
+        );
+    }
+
+    public static function update_quiz_settings_parameters() {
+        return new external_function_parameters(
+            array(
+                'quizid'   => new external_value(PARAM_INT, 'Instance ID of the quiz', VALUE_REQUIRED),
+                'grade'    => new external_value(PARAM_FLOAT, 'Maximum grade', VALUE_DEFAULT, null),
+                'attempts' => new external_value(PARAM_INT, 'Maximum attempts allowed', VALUE_DEFAULT, null),
+            )
+        );
+    }
+
+    public static function update_quiz_settings($quizid, $grade, $attempts) {
+        global $DB, $CFG;
+
+        $params = self::validate_parameters(self::update_quiz_settings_parameters(), array(
+            'quizid'   => $quizid,
+            'grade'    => $grade,
+            'attempts' => $attempts,
+        ));
+
+        $quiz = $DB->get_record('quiz', array('id' => $params['quizid']), '*', MUST_EXIST);
+        $context = context_course::instance($quiz->course);
+        self::validate_context($context);
+        require_capability('moodle/course:manageactivities', $context);
+
+        require_once($CFG->dirroot . '/mod/quiz/lib.php');
+
+        $update = new stdClass();
+        $update->id = $quiz->id;
+
+        if ($params['grade'] !== null) {
+            require_once($CFG->dirroot . '/mod/quiz/locallib.php');
+            if (class_exists('\mod_quiz\quiz_settings')) {
+                \mod_quiz\quiz_settings::create($quiz->id)->get_grade_calculator()->update_quiz_maximum_grade($params['grade']);
+            } else {
+                $update->grade = $params['grade'];
+                $DB->update_record('quiz', $update);
+                quiz_update_grades($quiz);
+            }
+        }
+
+        if ($params['attempts'] !== null) {
+            $update->attempts = $params['attempts'];
+            $DB->update_record('quiz', $update);
+        }
+
+        return array(
+            'status' => true,
+        );
+    }
+
+    public static function update_quiz_settings_returns() {
+        return new external_single_structure(
+            array(
+                'status' => new external_value(PARAM_BOOL, 'True if successful'),
+            )
+        );
+    }
 }
+
